@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv sync --python 3.11
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy stochast
+      - run: uv run pytest

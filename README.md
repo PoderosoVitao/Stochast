@@ -50,7 +50,10 @@ refund_status_lookup (20 runs)
   pass rate: 18/20 (90%)
 ```
 
-Every run is persisted as JSON under `stochast-results/` for later inspection.
+Every run is persisted as JSON under `stochast-results/`, alongside a `report.md` summarizing
+pass rate and per-assertion failure rates, each with a 95% confidence interval. See
+[`examples/refund_agent`](examples/refund_agent) for a complete, runnable version of the example
+above, with three scenarios covering the full assertion vocabulary.
 
 ## Retry policy
 
@@ -63,9 +66,11 @@ you're trying to take.
 
 Early and incomplete. Currently implemented: the `@scenario` decorator, an OpenAI-compatible
 tool-calling adapter, a concurrent runner with the retry policy above and Ctrl-C-safe partial
-results, and two assertions (`tool_called`, `output_contains`). Confidence intervals, the full
-assertion vocabulary, tool-path frequency tables, cost/latency percentiles, and A/B comparison are
-planned but not yet built.
+results, the full assertion vocabulary (`tool_called`, `tool_not_called`, `tool_called_times`,
+`tool_args`, `tool_order`, `max_tool_calls`, `output_contains`, `output_matches`, `no_error`,
+`custom`), Wilson confidence intervals, per-assertion failure-rate breakdowns, and a markdown
+report. Tool-path frequency tables, cost/latency percentiles, and A/B comparison are planned but
+not yet built.
 
 ## Install
 

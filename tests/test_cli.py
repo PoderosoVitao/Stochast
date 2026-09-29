@@ -177,3 +177,87 @@ def test_run_reports_no_scenarios_matched(tmp_path: Path):
 
     assert result.exit_code == 1
     assert "No scenarios matched" in result.output
+
+
+def test_run_writes_a_combined_markdown_report(tmp_path: Path):
+    scenario_file = write(tmp_path / "scenarios.py", SCENARIO_SOURCE)
+    adapter_file = write(tmp_path / "adapter.py", ADAPTER_SOURCE)
+    out_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--adapter",
+            f"{adapter_file}:build_adapter",
+            "--concurrency",
+            "1",
+            "-o",
+            str(out_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    report_text = (out_dir / "report.md").read_text()
+    assert "## refund_status_lookup" in report_text
+    assert "3/3" in report_text
+
+
+def test_report_command_renders_markdown_from_saved_json(tmp_path: Path):
+    scenario_file = write(tmp_path / "scenarios.py", SCENARIO_SOURCE)
+    adapter_file = write(tmp_path / "adapter.py", ADAPTER_SOURCE)
+    out_dir = tmp_path / "out"
+
+    runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--adapter",
+            f"{adapter_file}:build_adapter",
+            "--concurrency",
+            "1",
+            "-o",
+            str(out_dir),
+        ],
+    )
+
+    result = runner.invoke(app, ["report", str(out_dir / "refund_status_lookup.json")])
+
+    assert result.exit_code == 0, result.output
+    assert "## refund_status_lookup" in result.output
+
+
+def test_report_command_writes_to_a_file_when_out_is_given(tmp_path: Path):
+    scenario_file = write(tmp_path / "scenarios.py", SCENARIO_SOURCE)
+    adapter_file = write(tmp_path / "adapter.py", ADAPTER_SOURCE)
+    out_dir = tmp_path / "out"
+
+    runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--adapter",
+            f"{adapter_file}:build_adapter",
+            "--concurrency",
+            "1",
+            "-o",
+            str(out_dir),
+        ],
+    )
+
+    report_file = tmp_path / "custom-report.md"
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            str(out_dir / "refund_status_lookup.json"),
+            "-o",
+            str(report_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "## refund_status_lookup" in report_file.read_text()

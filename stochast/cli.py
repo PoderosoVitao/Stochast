@@ -12,9 +12,11 @@ from rich.console import Console
 from rich.progress import Progress
 
 from stochast.adapters import AgentAdapter
-from stochast.records import save_run_records
+from stochast.records import load_run_records, save_run_records
+from stochast.report import render_markdown
 from stochast.runner import RunInterrupted, run_scenario
 from stochast.scenario import Scenario, clear_registry, registered_scenarios
+from stochast.stats import ScenarioStats, analyze_scenario
 
 app = typer.Typer()
 console = Console()
@@ -86,8 +88,9 @@ def run(
         raise typer.Exit(code=1)
 
     ok = True
+    all_stats = []
     for scenario in scenarios:
-        ok &= _run_one(
+        passed_threshold, stats = _run_one(
             replace(scenario, runs=runs) if runs else scenario,
             factory,
             concurrency=concurrency,
@@ -96,12 +99,20 @@ def run(
             fail_under=fail_under,
             out=out,
         )
+        ok &= passed_threshold
+        all_stats.append(stats)
+
+    report_path = out / "report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_markdown(all_stats))
+    console.print(f"report written to {report_path}")
 
     raise typer.Exit(code=0 if ok else 1)
 
 
 # Runs a single scenario, writes its RunRecords to disk, and prints its pass
-# rate. Returns whether its pass rate met fail_under.
+# rate. Returns whether its pass rate met fail_under, and its stats for the
+# combined report.
 def _run_one(
     scenario: Scenario,
     factory: Callable[[], AgentAdapter],
@@ -111,7 +122,7 @@ def _run_one(
     seed: int | None,
     fail_under: float,
     out: Path,
-) -> bool:
+) -> tuple[bool, ScenarioStats]:
     console.print(f"[bold]{scenario.name}[/bold] ({scenario.runs} runs)")
 
     with Progress(console=console, transient=True) as progress:
@@ -132,8 +143,21 @@ def _run_one(
 
     save_run_records(records, out / f"{scenario.name}.json")
 
-    passed = sum(1 for r in records if r.passed)
-    total = len(records)
-    rate = passed / total if total else 0.0
-    console.print(f"  pass rate: {passed}/{total} ({rate:.0%})")
-    return rate >= fail_under
+    stats = analyze_scenario(records)
+    console.print(f"  pass rate: {stats.passed_runs}/{stats.total_runs} ({stats.pass_rate:.0%})")
+    return stats.pass_rate >= fail_under, stats
+
+
+@app.command()
+def report(
+    paths: list[Path] = typer.Argument(..., exists=True, help="RunRecord JSON file(s)"),
+    out: Path | None = typer.Option(
+        None, "-o", "--out", help="write markdown here instead of stdout"
+    ),
+) -> None:
+    all_stats = [analyze_scenario(load_run_records(p)) for p in paths]
+    markdown = render_markdown(all_stats)
+    if out is None:
+        console.print(markdown)
+    else:
+        out.write_text(markdown)

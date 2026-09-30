@@ -1,7 +1,7 @@
 import pytest
 
-from stochast.records import AssertionResult, RunRecord
-from stochast.stats import analyze_scenario, wilson_interval
+from stochast.records import AssertionResult, RunRecord, ToolCall
+from stochast.stats import analyze_scenario, percentiles, tool_path_frequencies, wilson_interval
 
 
 def test_wilson_interval_matches_the_spec_worked_example():
@@ -35,13 +35,24 @@ def test_wilson_interval_rejects_invalid_inputs():
         wilson_interval(11, 10)
 
 
-def make_record(run_index: int, *, passed_labels: dict[str, bool]) -> RunRecord:
+def make_record(
+    run_index: int,
+    *,
+    passed_labels: dict[str, bool],
+    tool_calls: list[ToolCall] | None = None,
+    latency_ms: float = 0.0,
+    cost_usd: float = 0.0,
+    error: str | None = None,
+) -> RunRecord:
     return RunRecord(
         run_index=run_index,
         scenario_name="refund_status_lookup",
-        tool_calls=[],
+        tool_calls=tool_calls or [],
         final_output="ok",
         assertions=[AssertionResult(label=label, passed=p) for label, p in passed_labels.items()],
+        latency_ms=latency_ms,
+        cost_usd=cost_usd,
+        error=error,
     )
 
 
@@ -92,3 +103,82 @@ def test_analyze_scenario_orders_assertions_worst_first():
 def test_analyze_scenario_rejects_an_empty_list():
     with pytest.raises(ValueError):
         analyze_scenario([])
+
+
+def test_percentiles_matches_linear_interpolation_reference_values():
+    stats = percentiles([1.0, 2.0, 3.0, 4.0, 5.0])
+
+    assert stats.min == 1.0
+    assert stats.max == 5.0
+    assert stats.p50 == pytest.approx(3.0)
+    assert stats.p95 == pytest.approx(4.8)
+    assert stats.p99 == pytest.approx(4.96)
+
+
+def test_percentiles_of_a_single_value_is_that_value_everywhere():
+    stats = percentiles([7.0])
+
+    assert (stats.p50, stats.p95, stats.p99, stats.min, stats.max) == (7.0, 7.0, 7.0, 7.0, 7.0)
+
+
+def test_percentiles_rejects_an_empty_list():
+    with pytest.raises(ValueError):
+        percentiles([])
+
+
+def test_tool_path_frequencies_counts_distinct_sequences_most_common_first():
+    records = [
+        make_record(0, passed_labels={}, tool_calls=[ToolCall(name="a", arguments={})]),
+        make_record(1, passed_labels={}, tool_calls=[ToolCall(name="a", arguments={})]),
+        make_record(
+            2,
+            passed_labels={},
+            tool_calls=[ToolCall(name="a", arguments={}), ToolCall(name="b", arguments={})],
+        ),
+        make_record(3, passed_labels={}, tool_calls=[]),
+    ]
+
+    frequencies = tool_path_frequencies(records)
+
+    assert frequencies[0].path == ("a",)
+    assert frequencies[0].count == 2
+    assert frequencies[0].frequency == pytest.approx(0.5)
+    assert ("a", "b") in [f.path for f in frequencies]
+    assert () in [f.path for f in frequencies]
+
+
+def test_analyze_scenario_includes_tool_paths_percentiles_and_failing_samples():
+    records = [
+        make_record(
+            0,
+            passed_labels={"a": True},
+            tool_calls=[ToolCall(name="lookup_order", arguments={})],
+            latency_ms=100.0,
+            cost_usd=0.01,
+        ),
+        make_record(
+            1,
+            passed_labels={"a": False},
+            tool_calls=[ToolCall(name="lookup_order", arguments={})],
+            latency_ms=200.0,
+            cost_usd=0.02,
+            error="boom",
+        ),
+    ]
+
+    stats = analyze_scenario(records)
+
+    assert stats.tool_paths[0].path == ("lookup_order",)
+    assert stats.tool_paths[0].count == 2
+    assert stats.latency_ms.min == 100.0
+    assert stats.latency_ms.max == 200.0
+    assert stats.cost_usd.max == pytest.approx(0.02)
+    assert [r.run_index for r in stats.failing_samples] == [1]
+
+
+def test_analyze_scenario_caps_failing_samples():
+    records = [make_record(i, passed_labels={"a": False}) for i in range(10)]
+
+    stats = analyze_scenario(records)
+
+    assert len(stats.failing_samples) == 5

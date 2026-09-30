@@ -12,6 +12,7 @@ class AgentResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cost_usd: float = 0.0
     raw_messages: list[dict[str, Any]] = field(default_factory=list)
 
 

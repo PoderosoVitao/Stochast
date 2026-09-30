@@ -21,6 +21,7 @@ class AgentHandle:
         self.final_output: str = ""
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.cost_usd = 0.0
         self.raw_messages: list[dict[str, Any]] = []
 
     def run(self, prompt: str) -> AgentResult:
@@ -29,6 +30,7 @@ class AgentHandle:
         self.final_output = result.output
         self.prompt_tokens += result.prompt_tokens
         self.completion_tokens += result.completion_tokens
+        self.cost_usd += result.cost_usd
         self.raw_messages.extend(result.raw_messages)
         return result
 
@@ -88,6 +90,7 @@ def _execute_run(
         assertions=assertions,
         prompt_tokens=agent.prompt_tokens,
         completion_tokens=agent.completion_tokens,
+        cost_usd=agent.cost_usd,
         latency_ms=(time.monotonic() - start) * 1000,
         error=error,
         raw_messages=agent.raw_messages,

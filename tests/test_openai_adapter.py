@@ -35,6 +35,29 @@ def test_run_returns_output_and_token_usage_when_model_answers_directly():
     assert result.tool_calls == []
 
 
+def test_run_reports_zero_cost_when_no_pricing_is_configured():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return completion(content="ok")
+
+    result = adapter_with(handler).run("hello")
+
+    assert result.cost_usd == 0.0
+
+
+def test_run_computes_cost_from_configured_per_million_token_prices():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return completion(content="ok")
+
+    result = adapter_with(
+        handler,
+        price_per_million_input_tokens=3.0,
+        price_per_million_output_tokens=15.0,
+    ).run("hello")
+
+    # 10 prompt tokens * $3/1M + 4 completion tokens * $15/1M
+    assert result.cost_usd == pytest.approx((10 * 3.0 + 4 * 15.0) / 1_000_000)
+
+
 def test_run_executes_a_requested_tool_and_returns_final_answer():
     calls = 0
 

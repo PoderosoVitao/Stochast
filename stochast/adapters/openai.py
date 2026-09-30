@@ -43,6 +43,8 @@ class OpenAIAdapter:
         seed: int | None = None,
         timeout: float = 30.0,
         client: httpx.Client | None = None,
+        price_per_million_input_tokens: float | None = None,
+        price_per_million_output_tokens: float | None = None,
     ) -> None:
         self.model = model
         self.tools = tools or []
@@ -51,11 +53,20 @@ class OpenAIAdapter:
         self.base_url = base_url.rstrip("/")
         self.max_tool_iterations = max_tool_iterations
         self.seed = seed
+        self.price_per_million_input_tokens = price_per_million_input_tokens
+        self.price_per_million_output_tokens = price_per_million_output_tokens
         self._handlers = {tool.name: tool.handler for tool in self.tools}
         self._client = client or httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         self._client.close()
+
+    # Computes cost from token usage; zero unless pricing was configured,
+    # since stochast has no built-in per-model price list to go stale.
+    def _cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        input_price = self.price_per_million_input_tokens or 0.0
+        output_price = self.price_per_million_output_tokens or 0.0
+        return (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
 
     # Drives the chat-completions tool-calling loop for a single prompt,
     # executing any requested tools locally, until the model answers
@@ -86,6 +97,7 @@ class OpenAIAdapter:
                     tool_calls=tool_calls,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    cost_usd=self._cost(prompt_tokens, completion_tokens),
                     raw_messages=messages,
                 )
 
@@ -97,6 +109,7 @@ class OpenAIAdapter:
             tool_calls=tool_calls,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            cost_usd=self._cost(prompt_tokens, completion_tokens),
             raw_messages=messages,
         )
 

@@ -25,6 +25,20 @@ def test_run_scenario_executes_the_requested_number_of_runs():
     assert all(r.final_output == "ok" for r in records)
 
 
+def test_run_scenario_accumulates_cost_across_multiple_agent_run_calls():
+    class PricedAdapter:
+        def run(self, prompt: str) -> AgentResult:
+            return AgentResult(output="ok", cost_usd=0.002)
+
+    def body(agent):
+        agent.run("hello")
+        agent.run("again")
+
+    [record] = run_scenario(make_scenario(body), PricedAdapter)
+
+    assert record.cost_usd == pytest.approx(0.004)
+
+
 def test_run_scenario_records_assertion_outcomes_from_the_scenario_body():
     def body(agent):
         result = agent.run("hello")

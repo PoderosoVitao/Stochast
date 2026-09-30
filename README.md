@@ -51,9 +51,11 @@ refund_status_lookup (20 runs)
 ```
 
 Every run is persisted as JSON under `stochast-results/`, alongside a `report.md` summarizing
-pass rate and per-assertion failure rates, each with a 95% confidence interval. See
-[`examples/refund_agent`](examples/refund_agent) for a complete, runnable version of the example
-above, with three scenarios covering the full assertion vocabulary.
+pass rate and per-assertion failure rates (each with a 95% confidence interval), the distinct
+tool-call paths taken and how often each occurred, latency and cost percentiles, and a sample of
+failing runs with their traces. See [`examples/refund_agent`](examples/refund_agent) for a
+complete, runnable version of the example above, with three scenarios covering the full assertion
+vocabulary.
 
 ## Retry policy
 
@@ -68,9 +70,11 @@ Early and incomplete. Currently implemented: the `@scenario` decorator, an OpenA
 tool-calling adapter, a concurrent runner with the retry policy above and Ctrl-C-safe partial
 results, the full assertion vocabulary (`tool_called`, `tool_not_called`, `tool_called_times`,
 `tool_args`, `tool_order`, `max_tool_calls`, `output_contains`, `output_matches`, `no_error`,
-`custom`), Wilson confidence intervals, per-assertion failure-rate breakdowns, and a markdown
-report. Tool-path frequency tables, cost/latency percentiles, and A/B comparison are planned but
-not yet built.
+`custom`), Wilson confidence intervals, per-assertion failure-rate breakdowns, tool-call path
+frequency tables, cost/latency percentiles (cost tracking is opt-in — pass per-token pricing to
+`OpenAIAdapter` if you want it, since stochast ships no built-in price list to go stale), failing-run
+traces, and a markdown report. A/B comparison between two configurations is planned but not yet
+built.
 
 ## Install
 

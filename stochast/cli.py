@@ -16,10 +16,10 @@ from stochast.records import load_run_records, save_run_records
 from stochast.report import render_markdown
 from stochast.runner import RunInterrupted, run_scenario
 from stochast.scenario import Scenario, clear_registry, registered_scenarios
-from stochast.stats import ScenarioStats, analyze_scenario
+from stochast.stats import ScenarioStats, analyze_scenario, compare_pass_rates
 
 app = typer.Typer()
-console = Console()
+console = Console(soft_wrap=True)
 
 
 # Forces "stochast run ..." to require the "run" subcommand name even while
@@ -161,3 +161,25 @@ def report(
         console.print(markdown)
     else:
         out.write_text(markdown)
+
+
+@app.command()
+def compare(
+    baseline: Path = typer.Argument(..., exists=True, help="baseline RunRecord JSON file"),
+    variant: Path = typer.Argument(..., exists=True, help="variant RunRecord JSON file"),
+    alpha: float = typer.Option(0.05, "--alpha", help="significance threshold"),
+) -> None:
+    result = compare_pass_rates(load_run_records(baseline), load_run_records(variant), alpha=alpha)
+
+    console.print(
+        f"baseline: {result.baseline_passed}/{result.baseline_total} "
+        f"({result.baseline_pass_rate:.0%})"
+    )
+    console.print(
+        f"variant:  {result.variant_passed}/{result.variant_total} ({result.variant_pass_rate:.0%})"
+    )
+    console.print(f"difference: {result.difference:+.0%}  (p={result.p_value:.4f})")
+    console.print(result.verdict)
+
+    regressed = result.significant and result.difference < 0
+    raise typer.Exit(code=1 if regressed else 0)

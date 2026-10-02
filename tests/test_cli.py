@@ -4,6 +4,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from stochast.cli import app
+from stochast.records import AssertionResult, RunRecord, save_run_records
 
 runner = CliRunner()
 
@@ -261,3 +262,52 @@ def test_report_command_writes_to_a_file_when_out_is_given(tmp_path: Path):
 
     assert result.exit_code == 0, result.output
     assert "## refund_status_lookup" in report_file.read_text()
+
+
+def make_records(passed: int, total: int) -> list[RunRecord]:
+    return [
+        RunRecord(
+            run_index=i,
+            scenario_name="refund_status_lookup",
+            tool_calls=[],
+            final_output="ok",
+            assertions=[AssertionResult(label="a", passed=i < passed)],
+        )
+        for i in range(total)
+    ]
+
+
+def test_compare_reports_a_significant_regression_and_exits_nonzero(tmp_path: Path):
+    baseline_file = tmp_path / "baseline.json"
+    variant_file = tmp_path / "variant.json"
+    save_run_records(make_records(10, 10), baseline_file)
+    save_run_records(make_records(5, 10), variant_file)
+
+    result = runner.invoke(app, ["compare", str(baseline_file), str(variant_file)])
+
+    assert result.exit_code == 1, result.output
+    assert "significantly worse" in result.output
+
+
+def test_compare_reports_insufficient_sample_and_exits_zero(tmp_path: Path):
+    baseline_file = tmp_path / "baseline.json"
+    variant_file = tmp_path / "variant.json"
+    save_run_records(make_records(5, 10), baseline_file)
+    save_run_records(make_records(6, 10), variant_file)
+
+    result = runner.invoke(app, ["compare", str(baseline_file), str(variant_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "too small" in result.output
+
+
+def test_compare_exits_zero_for_a_significant_improvement(tmp_path: Path):
+    baseline_file = tmp_path / "baseline.json"
+    variant_file = tmp_path / "variant.json"
+    save_run_records(make_records(5, 10), baseline_file)
+    save_run_records(make_records(10, 10), variant_file)
+
+    result = runner.invoke(app, ["compare", str(baseline_file), str(variant_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "significantly better" in result.output

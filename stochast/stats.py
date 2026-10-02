@@ -161,3 +161,137 @@ def analyze_scenario(records: list[RunRecord]) -> ScenarioStats:
         cost_usd=percentiles([r.cost_usd for r in records]),
         failing_samples=failing_samples,
     )
+
+
+# Computes the two-sided exact p-value for a 2x2 contingency table under
+# Fisher's exact test: the probability, under fixed row/column totals, of a
+# table at least as extreme as the one observed. Used instead of a normal
+# approximation because eval batches are typically too small for one to be
+# reliable (the same reasoning behind using Wilson over the normal interval).
+def fisher_exact_p_value(successes_a: int, total_a: int, successes_b: int, total_b: int) -> float:
+    if total_a <= 0 or total_b <= 0:
+        raise ValueError("total_a and total_b must be positive")
+    if not 0 <= successes_a <= total_a or not 0 <= successes_b <= total_b:
+        raise ValueError("successes must be between 0 and the corresponding total")
+
+    successes = successes_a + successes_b
+    n = total_a + total_b
+    low = max(0, successes - total_b)
+    high = min(total_a, successes)
+
+    def table_probability(a: int) -> float:
+        return math.comb(total_a, a) * math.comb(total_b, successes - a) / math.comb(n, successes)
+
+    probabilities = {a: table_probability(a) for a in range(low, high + 1)}
+    observed = probabilities[successes_a]
+    as_extreme = (p for p in probabilities.values() if p <= observed * (1 + 1e-7))
+    return min(1.0, sum(as_extreme))
+
+
+# Projects, via a two-proportion z-test, how many total runs (scaling both
+# arms up proportionally, holding the observed rates fixed) would be needed
+# for the observed difference to reach significance. This is an estimate
+# based on a normal approximation, not a guarantee: it answers "if this
+# trend holds up, roughly how much more data would it take."
+def _runs_needed_for_significance(
+    successes_a: int, total_a: int, successes_b: int, total_b: int, alpha: float
+) -> int | None:
+    rate_a = successes_a / total_a
+    rate_b = successes_b / total_b
+    if rate_a == rate_b:
+        return None
+
+    pooled = (successes_a + successes_b) / (total_a + total_b)
+    se = (pooled * (1 - pooled) * (1 / total_a + 1 / total_b)) ** 0.5
+    z = (rate_b - rate_a) / se
+    z_alpha: float = NormalDist().inv_cdf(1 - alpha / 2)
+
+    multiplier: float = (z_alpha / abs(z)) ** 2
+    if multiplier <= 1:
+        return total_a + total_b
+    return math.ceil(multiplier * (total_a + total_b))
+
+
+@dataclass
+class ComparisonResult:
+    baseline_total: int
+    baseline_passed: int
+    baseline_pass_rate: float
+    variant_total: int
+    variant_passed: int
+    variant_pass_rate: float
+    difference: float
+    p_value: float
+    significant: bool
+    runs_needed_for_significance: int | None
+    verdict: str
+
+
+# Compares two batches of RunRecords (typically the same scenario run under
+# two configurations) and reports whether their pass rates differ
+# significantly, using Fisher's exact test. When they don't, says so plainly
+# instead of printing a misleading winner, and estimates how much more data
+# would be needed to tell them apart.
+def compare_pass_rates(
+    baseline: list[RunRecord], variant: list[RunRecord], alpha: float = 0.05
+) -> ComparisonResult:
+    if not baseline or not variant:
+        raise ValueError("cannot compare an empty list of run records")
+
+    baseline_total = len(baseline)
+    baseline_passed = sum(1 for r in baseline if r.passed)
+    variant_total = len(variant)
+    variant_passed = sum(1 for r in variant if r.passed)
+
+    baseline_rate = baseline_passed / baseline_total
+    variant_rate = variant_passed / variant_total
+    p_value = fisher_exact_p_value(baseline_passed, baseline_total, variant_passed, variant_total)
+    significant = p_value < alpha
+
+    runs_needed = None
+    if not significant:
+        runs_needed = _runs_needed_for_significance(
+            baseline_passed, baseline_total, variant_passed, variant_total, alpha
+        )
+
+    return ComparisonResult(
+        baseline_total=baseline_total,
+        baseline_passed=baseline_passed,
+        baseline_pass_rate=baseline_rate,
+        variant_total=variant_total,
+        variant_passed=variant_passed,
+        variant_pass_rate=variant_rate,
+        difference=variant_rate - baseline_rate,
+        p_value=p_value,
+        significant=significant,
+        runs_needed_for_significance=runs_needed,
+        verdict=_verdict(baseline_rate, variant_rate, p_value, significant, runs_needed, alpha),
+    )
+
+
+def _verdict(
+    baseline_rate: float,
+    variant_rate: float,
+    p_value: float,
+    significant: bool,
+    runs_needed: int | None,
+    alpha: float,
+) -> str:
+    change = f"{baseline_rate:.0%} -> {variant_rate:.0%}"
+    if significant:
+        direction = "better" if variant_rate > baseline_rate else "worse"
+        return (
+            f"The variant is significantly {direction} than the baseline "
+            f"({change}, p={p_value:.3f})."
+        )
+
+    estimate = (
+        f" Roughly {runs_needed} total runs would be needed to detect this "
+        f"difference at p<{alpha:g}."
+        if runs_needed is not None
+        else ""
+    )
+    return (
+        f"No significant difference detected ({change}, p={p_value:.3f}). The sample is too "
+        f"small to distinguish the two configurations.{estimate}"
+    )

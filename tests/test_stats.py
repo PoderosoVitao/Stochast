@@ -1,7 +1,14 @@
 import pytest
 
 from stochast.records import AssertionResult, RunRecord, ToolCall
-from stochast.stats import analyze_scenario, percentiles, tool_path_frequencies, wilson_interval
+from stochast.stats import (
+    analyze_scenario,
+    compare_pass_rates,
+    fisher_exact_p_value,
+    percentiles,
+    tool_path_frequencies,
+    wilson_interval,
+)
 
 
 def test_wilson_interval_matches_the_spec_worked_example():
@@ -182,3 +189,82 @@ def test_analyze_scenario_caps_failing_samples():
     stats = analyze_scenario(records)
 
     assert len(stats.failing_samples) == 5
+
+
+def test_fisher_exact_p_value_matches_the_tea_tasting_reference():
+    assert fisher_exact_p_value(3, 4, 1, 4) == pytest.approx(0.4857142857, abs=1e-8)
+
+
+def test_fisher_exact_p_value_is_symmetric_between_groups():
+    assert fisher_exact_p_value(3, 4, 1, 4) == pytest.approx(fisher_exact_p_value(1, 4, 3, 4))
+
+
+def test_fisher_exact_p_value_is_one_for_identical_rates():
+    assert fisher_exact_p_value(5, 10, 5, 10) == pytest.approx(1.0)
+
+
+def test_fisher_exact_p_value_rejects_invalid_inputs():
+    with pytest.raises(ValueError):
+        fisher_exact_p_value(1, 0, 1, 10)
+    with pytest.raises(ValueError):
+        fisher_exact_p_value(11, 10, 1, 10)
+
+
+def make_pass_fail_records(scenario_name: str, passed: int, total: int) -> list[RunRecord]:
+    records = []
+    for i in range(total):
+        ok = i < passed
+        records.append(
+            RunRecord(
+                run_index=i,
+                scenario_name=scenario_name,
+                tool_calls=[],
+                final_output="ok",
+                assertions=[AssertionResult(label="a", passed=ok)],
+            )
+        )
+    return records
+
+
+def test_compare_pass_rates_detects_a_significant_difference():
+    baseline = make_pass_fail_records("s", 10, 10)
+    variant = make_pass_fail_records("s", 5, 10)
+
+    result = compare_pass_rates(baseline, variant)
+
+    assert result.baseline_pass_rate == pytest.approx(1.0)
+    assert result.variant_pass_rate == pytest.approx(0.5)
+    assert result.difference == pytest.approx(-0.5)
+    assert result.p_value == pytest.approx(0.0325, abs=1e-3)
+    assert result.significant is True
+    assert result.runs_needed_for_significance is None
+    assert "worse" in result.verdict
+
+
+def test_compare_pass_rates_reports_insufficient_sample_for_a_small_difference():
+    baseline = make_pass_fail_records("s", 5, 10)
+    variant = make_pass_fail_records("s", 6, 10)
+
+    result = compare_pass_rates(baseline, variant)
+
+    assert result.significant is False
+    assert result.runs_needed_for_significance is not None
+    assert result.runs_needed_for_significance > 20
+    assert "too small" in result.verdict
+
+
+def test_compare_pass_rates_runs_needed_is_none_for_identical_rates():
+    baseline = make_pass_fail_records("s", 5, 10)
+    variant = make_pass_fail_records("s", 5, 10)
+
+    result = compare_pass_rates(baseline, variant)
+
+    assert result.significant is False
+    assert result.runs_needed_for_significance is None
+
+
+def test_compare_pass_rates_rejects_empty_lists():
+    with pytest.raises(ValueError):
+        compare_pass_rates([], make_pass_fail_records("s", 1, 1))
+    with pytest.raises(ValueError):
+        compare_pass_rates(make_pass_fail_records("s", 1, 1), [])

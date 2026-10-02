@@ -57,6 +57,28 @@ failing runs with their traces. See [`examples/refund_agent`](examples/refund_ag
 complete, runnable version of the example above, with three scenarios covering the full assertion
 vocabulary.
 
+## Did my change actually help?
+
+```
+stochast compare stochast-results/baseline.json stochast-results/variant.json
+```
+
+```
+baseline: 10/10 (100%)
+variant:  5/10 (50%)
+difference: -50%  (p=0.0325)
+The variant is significantly worse than the baseline (100% -> 50%, p=0.033).
+```
+
+When the sample is too small to tell, it says so instead of printing a misleading winner, and
+estimates how many more runs it would take to find out:
+
+```
+No significant difference detected (50% -> 60%, p=1.000). The sample is too small to
+distinguish the two configurations. Roughly 381 total runs would be needed to detect this
+difference at p<0.05.
+```
+
 ## Retry policy
 
 Stochast retries transport errors (timeouts, connection failures, 429s, 5xxs) with backoff,
@@ -66,15 +88,18 @@ you're trying to take.
 
 ## Status
 
-Early and incomplete. Currently implemented: the `@scenario` decorator, an OpenAI-compatible
-tool-calling adapter, a concurrent runner with the retry policy above and Ctrl-C-safe partial
-results, the full assertion vocabulary (`tool_called`, `tool_not_called`, `tool_called_times`,
-`tool_args`, `tool_order`, `max_tool_calls`, `output_contains`, `output_matches`, `no_error`,
-`custom`), Wilson confidence intervals, per-assertion failure-rate breakdowns, tool-call path
-frequency tables, cost/latency percentiles (cost tracking is opt-in — pass per-token pricing to
-`OpenAIAdapter` if you want it, since stochast ships no built-in price list to go stale), failing-run
-traces, and a markdown report. A/B comparison between two configurations is planned but not yet
-built.
+Implemented: the `@scenario` decorator, an OpenAI-compatible tool-calling adapter, a concurrent
+runner with the retry policy above and Ctrl-C-safe partial results, the full assertion vocabulary
+(`tool_called`, `tool_not_called`, `tool_called_times`, `tool_args`, `tool_order`,
+`max_tool_calls`, `output_contains`, `output_matches`, `no_error`, `custom`), Wilson confidence
+intervals, per-assertion failure-rate breakdowns, tool-call path frequency tables, cost/latency
+percentiles (cost tracking is opt-in — pass per-token pricing to `OpenAIAdapter` if you want it,
+since stochast ships no built-in price list to go stale), failing-run traces, a markdown report,
+and A/B comparison via Fisher's exact test with an explicit insufficient-sample verdict.
+
+By design, this stays a CLI tool: no web UI or dashboard, no database (JSON on disk), no
+LLM-as-judge grading, and no framework-specific adapters — write your own `AgentAdapter` for
+anything beyond the OpenAI-compatible wire format, which takes about twenty lines.
 
 ## Install
 

@@ -25,6 +25,21 @@ def test_run_scenario_executes_the_requested_number_of_runs():
     assert all(r.final_output == "ok" for r in records)
 
 
+def test_run_scenario_calls_on_run_complete_once_per_run_with_its_record():
+    def body(agent):
+        agent.run("hello")
+
+    completed: list[int] = []
+    records = run_scenario(
+        make_scenario(body, runs=5),
+        OkAdapter,
+        concurrency=3,
+        on_run_complete=lambda r: completed.append(r.run_index),
+    )
+
+    assert sorted(completed) == [r.run_index for r in records]
+
+
 def test_run_scenario_accumulates_cost_across_multiple_agent_run_calls():
     class PricedAdapter:
         def run(self, prompt: str) -> AgentResult:

@@ -100,6 +100,8 @@ def _execute_run(
 # Runs a scenario `scenario.runs` times with bounded concurrency, returning
 # one RunRecord per run sorted by run_index. Raises RunInterrupted, carrying
 # whatever runs had already completed, if a KeyboardInterrupt surfaces.
+# on_progress and on_run_complete both fire from the calling thread as each
+# run finishes, in whatever order they complete (not run_index order).
 def run_scenario(
     scenario: Scenario,
     adapter_factory: Callable[[], AgentAdapter],
@@ -108,6 +110,7 @@ def run_scenario(
     retries: int = 3,
     seed: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    on_run_complete: Callable[[RunRecord], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[RunRecord]:
     total = scenario.runs
@@ -128,9 +131,12 @@ def run_scenario(
         futures = {pool.submit(build_and_run, i): i for i in range(total)}
         try:
             for future in as_completed(futures):
-                records.append(future.result())
+                record = future.result()
+                records.append(record)
                 if on_progress is not None:
                     on_progress(len(records), total)
+                if on_run_complete is not None:
+                    on_run_complete(record)
         except KeyboardInterrupt:
             pool.shutdown(wait=False, cancel_futures=True)
             raise RunInterrupted(sorted(records, key=lambda r: r.run_index)) from None

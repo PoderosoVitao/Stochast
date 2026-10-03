@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import importlib
-import importlib.util
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from types import ModuleType
 
 import typer
 from rich.console import Console
 from rich.progress import Progress
 
 from stochast.adapters import AgentAdapter
+from stochast.discovery import discover_scenarios, resolve_adapter_factory
 from stochast.records import load_run_records, save_run_records
 from stochast.report import render_markdown
 from stochast.runner import RunInterrupted, run_scenario
@@ -29,35 +27,13 @@ def _callback() -> None:
     pass
 
 
-# Executes a Python file as a fresh module, so its top-level @scenario
-# decorators (or adapter factory) register/run as a side effect.
-def _import_file(path: Path) -> ModuleType:
-    module_name = "_stochast_" + path.resolve().as_posix().replace("/", "_").replace(".", "_")
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot import {path} as a Python module")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-# Imports every scenario file under `path` (or `path` itself if it's a file)
-# so their @scenario-decorated functions register into the global registry.
-def _discover_scenarios(path: Path) -> None:
-    files = [path] if path.is_file() else sorted(path.rglob("*.py"))
-    for file in files:
-        _import_file(file)
-
-
-# Resolves "module:factory" or "path/to/file.py:factory" into the callable.
+# Resolves an adapter spec, translating discovery's plain ValueError into
+# Typer's own error presentation at this CLI boundary.
 def _resolve_factory(spec: str) -> Callable[[], AgentAdapter]:
-    target, sep, attr = spec.rpartition(":")
-    if not sep:
-        raise typer.BadParameter("expected format module:factory or file.py:factory")
-    module = (
-        _import_file(Path(target)) if target.endswith(".py") else importlib.import_module(target)
-    )
-    return getattr(module, attr)  # type: ignore[no-any-return]
+    try:
+        return resolve_adapter_factory(spec)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -79,7 +55,7 @@ def run(
     ),
 ) -> None:
     clear_registry()
-    _discover_scenarios(path)
+    discover_scenarios(path)
     factory = _resolve_factory(adapter)
 
     scenarios = [s for s in registered_scenarios() if keyword in s.name]

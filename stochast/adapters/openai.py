@@ -114,7 +114,9 @@ class OpenAIAdapter:
         )
 
     # Sends one chat-completions request, translating network-level and
-    # 429/5xx failures into TransportError so the runner knows to retry.
+    # 429/5xx failures into TransportError so the runner knows to retry. Any
+    # other error status raises with the provider's response body attached,
+    # since that body is what explains a 400 or 401.
     def _complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.model, "messages": messages}
         if self.tools:
@@ -133,7 +135,12 @@ class OpenAIAdapter:
 
         if response.status_code == 429 or response.status_code >= 500:
             raise TransportError(f"{response.status_code}: {response.text}")
-        response.raise_for_status()
+        if response.is_error:
+            raise httpx.HTTPStatusError(
+                f"{response.status_code} from {response.url}: {response.text[:1000]}",
+                request=response.request,
+                response=response,
+            )
         return cast(dict[str, Any], response.json())
 
     # Runs one model-requested tool call locally and records its outcome,

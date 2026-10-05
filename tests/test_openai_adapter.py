@@ -156,3 +156,12 @@ def test_run_raises_http_status_error_on_non_retryable_status_codes():
 
     with pytest.raises(httpx.HTTPStatusError):
         adapter_with(handler).run("hello")
+
+
+def test_non_retryable_errors_carry_the_providers_explanation():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {"error": {"message": "Your credit balance is too low to access the API."}}
+        return httpx.Response(400, json=body)
+
+    with pytest.raises(httpx.HTTPStatusError, match="credit balance is too low"):
+        adapter_with(handler).run("hello")

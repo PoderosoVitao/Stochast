@@ -1,6 +1,6 @@
 [project]
 name = "stochast"
-version = "0.1.0"
+version = "0.2.0"
 description = "A testing tool for LLM agents that reports statistics instead of verdicts."
 readme = "README.md"
 license = "MIT"
